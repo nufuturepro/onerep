@@ -31,6 +31,11 @@ export type Staged<S extends Record<string, unknown>> = {
   db: BunSQLiteDatabase<S>;
   /** The underlying handle, for FTS5 DDL and explicit transactions. */
   raw: Database;
+  /**
+   * Finalizes the prepared statements and closes the handle. Idempotent, so
+   * both the success and the error path of an import may call it.
+   */
+  close(): void;
 };
 
 /**
@@ -65,7 +70,22 @@ export function openStaged<S extends Record<string, unknown>>(
 
   for (const table of schemaTables(schema)) raw.exec(createTableSql(table));
 
-  return { db: drizzle(raw, { schema }), raw };
+  let closed = false;
+  return {
+    db: drizzle(raw, { schema }),
+    raw,
+    close() {
+      if (closed) return;
+      closed = true;
+      // Drizzle's prepared statements are reclaimed by the garbage collector,
+      // not by `Database.close()`, and on Windows an unfinalized statement
+      // keeps the SQLite file handle open. That would make the rename in
+      // `promote()` fail with EBUSY, so force a collection pass here. POSIX
+      // is unaffected either way; the cost is one GC per import.
+      raw.close();
+      Bun.gc(true);
+    },
+  };
 }
 
 /**
@@ -99,6 +119,47 @@ export function createIndexes<S extends Record<string, unknown>>(
 }
 
 /**
+ * Readonly handles currently open on live database files, keyed by file path.
+ *
+ * Windows cannot rename a file that any handle has open, so before a promotion
+ * swaps a live file out, the readers registered here must be closed. They
+ * reopen lazily on the next request, which is exactly what {@link LiveStore}
+ * is designed to do.
+ */
+const liveReaders = new Map<string, Set<Database>>();
+
+function readersFor(path: string): Set<Database> {
+  let readers = liveReaders.get(path);
+  if (!readers) {
+    readers = new Set();
+    liveReaders.set(path, readers);
+  }
+  return readers;
+}
+
+/**
+ * Closes every registered reader on `path`. POSIX unaffected; Windows required.
+ *
+ * Closing is not enough on Windows: any drizzle statement a reader created is
+ * only reclaimed by the garbage collector, and an unfinalized statement keeps
+ * the file handle open. The forced collection pass finalizes them, which is
+ * what makes the rename in {@link promote} safe.
+ */
+function releaseLiveReaders(path: string): void {
+  const readers = liveReaders.get(path);
+  if (!readers) return;
+  liveReaders.delete(path);
+  for (const reader of [...readers]) {
+    try {
+      reader.close();
+    } catch {
+      // Already gone; the reopen path does not care.
+    }
+  }
+  Bun.gc(true);
+}
+
+/**
  * Validates a staged database and swaps it in, keeping the outgoing file as a
  * rollback copy. A failure here leaves the running server untouched.
  */
@@ -117,17 +178,32 @@ export function promote(dataDir: string, id: string, expectedRows: number): void
     db.close();
   }
 
+  // On Windows the renames below fail with EBUSY while any handle still has
+  // the live file open, so same-process readers are closed first and reopen
+  // lazily afterwards. The collection pass finalizes drizzle statements from
+  // the build phase, whose file handles would otherwise survive until an
+  // arbitrary later GC.
+  releaseLiveReaders(live);
+  Bun.gc(true);
   if (existsSync(live)) {
     rmSync(previous, { force: true });
     renameSync(live, previous);
   }
-  renameSync(staged, live);
+  try {
+    renameSync(staged, live);
+  } catch (error) {
+    throw new Error(
+      `promote: could not rename ${staged} to ${live} after releasing live readers`,
+      { cause: error },
+    );
+  }
 }
 
 export function rollback(dataDir: string, id: string): void {
   const live = livePath(dataDir, id);
   const previous = previousPath(dataDir, id);
   if (!existsSync(previous)) throw new Error(`no rollback database for ${id}`);
+  releaseLiveReaders(live);
   const spare = `${live}.rollback-swap`;
   if (existsSync(live)) renameSync(live, spare);
   renameSync(previous, live);
@@ -170,6 +246,7 @@ export class LiveStore<S extends Record<string, unknown>> {
     this.raw = new Database(this.path, { readonly: true });
     this.db = drizzle(this.raw, { schema: this.schema });
     this.inode = inode;
+    readersFor(this.path).add(this.raw);
     return this.db;
   }
 
@@ -180,9 +257,13 @@ export class LiveStore<S extends Record<string, unknown>> {
   }
 
   close(): void {
+    if (this.raw) liveReaders.get(this.path)?.delete(this.raw);
     this.raw?.close();
     this.raw = null;
     this.db = null;
     this.inode = null;
+    // Drizzle statements opened through this store are finalized by the
+    // collector; without this, Windows keeps the file locked until they run.
+    Bun.gc(true);
   }
 }

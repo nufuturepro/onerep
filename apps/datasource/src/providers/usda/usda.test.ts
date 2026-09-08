@@ -107,16 +107,12 @@ async function importFixture() {
 
   const provider = new UsdaProvider(dataDir);
   open.push(provider);
-  return {
-    dataDir,
-    summary,
-    provider,
-    db: new Database(livePath(dataDir, "usda"), { readonly: true }),
-  };
+  return { dataDir, summary, provider };
 }
 
 test("imports only the four catalog data types", async () => {
-  const { summary, db } = await importFixture();
+  const { summary, dataDir } = await importFixture();
+  const db = new Database(livePath(dataDir, "usda"), { readonly: true });
   const names = (db.query("SELECT name FROM foods ORDER BY fdc_id").all() as { name: string }[])
     .map((row) => row.name);
   // The sample_food row is skipped, the duplicate GTIN is collapsed and the
@@ -194,7 +190,8 @@ test("canonicalises GTINs so UPC and EAN forms resolve alike", async () => {
 });
 
 test("never leaves an alias pointing at a dropped food", async () => {
-  const { db } = await importFixture();
+  const { dataDir } = await importFixture();
+  const db = new Database(livePath(dataDir, "usda"), { readonly: true });
   const dangling = db
     .query(
       `SELECT count(*) AS n FROM aliases

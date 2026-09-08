@@ -104,7 +104,10 @@ scripts/form-JEPA/datasets/
 # artifact even though the originals are tracked.
 apps/mobile/ios/App/App/public/models/
 
-ideas.txt
+# Temporary repro / debug artifacts from datasource investigation.
+# Kept out of the repo by default; repro scripts that are ready for a PR
+# live in apps/datasource/repro/ instead.
+reimport-begin.txt
 
 # Needle 2 engine and weights: 90 MB of build artifacts from the model repo,
 # fetched by `bun run needle:fetch`. See scripts/needle/manifest.json.

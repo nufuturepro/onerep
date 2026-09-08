@@ -120,13 +120,13 @@ export async function build(context: BuildContext): Promise<BuildSummary> {
       portions: portionCount,
       imported_at: new Date().toISOString(),
     });
-    staged.raw.close();
+    staged.close();
 
     promote(dataDir, "usda", kept);
     log(`promoted usda database with ${kept} foods (from ${parsed} parsed)`);
     return { primary: kept, counts: { foods: kept, parsed, portions: portionCount } };
   } catch (error) {
-    staged.raw.close();
+    staged.close();
     throw error;
   }
 }

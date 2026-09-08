@@ -60,7 +60,7 @@ export async function build(context: BuildContext): Promise<BuildSummary> {
       malformed_lines: malformed,
       imported_at: new Date().toISOString(),
     });
-    staged.raw.close();
+    staged.close();
 
     promote(dataDir, "off", stored);
     log(`promoted off database with ${stored} products (from ${seen} scanned)`);
@@ -69,7 +69,7 @@ export async function build(context: BuildContext): Promise<BuildSummary> {
       counts: { products: stored, scanned: seen, duplicates, malformed },
     };
   } catch (error) {
-    staged.raw.close();
+    staged.close();
     throw error;
   }
 }
