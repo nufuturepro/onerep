@@ -38,12 +38,18 @@ describe("DEFAULT_MEAL_CATEGORIES", () => {
     expect(DEFAULT_MEAL_CATEGORIES).toHaveLength(4)
   })
 
-  test("contains breakfast, lunch, dinner, snack", () => {
+  test("contains breakfast, lunch, dinner, and now three snack moments", () => {
     const ids = DEFAULT_MEAL_CATEGORIES.map((c) => c.id)
     expect(ids).toContain("breakfast")
     expect(ids).toContain("lunch")
     expect(ids).toContain("dinner")
-    expect(ids).toContain("snack")
+    expect(ids).toContain("snack-post-breakfast")
+    expect(ids).toContain("snack-post-lunch")
+    expect(ids).toContain("snack-post-dinner")
+    // The old single "snack" id is still accepted as an alias by the meal-label
+    // and time-default code, so existing entries that still say "snack" do not
+    // become unrenderable. New logging surfaces offer the three moments instead.
+    expect(ids).not.toContain("snack")
   })
 
   test("all default categories have isDefault: true", () => {
@@ -59,6 +65,25 @@ describe("DEFAULT_MEAL_CATEGORIES", () => {
       expect(cat.color).toBeTruthy()
       expect(cat.bg).toBeTruthy()
     }
+  })
+})
+
+// ── mealLabel ────────────────────────────────────────────────────────────────
+
+import { mealLabel } from "../food-log"
+
+describe("mealLabel", () => {
+  test("renders the three post-meal snack moments", () => {
+    expect(mealLabel("snack-post-breakfast")).toBe("Post-breakfast snack")
+    expect(mealLabel("snack-post-lunch")).toBe("Post-lunch snack")
+    expect(mealLabel("snack-post-dinner")).toBe("Post-dinner snack")
+    expect(mealLabel("snack")).toBe("Snack")
+  })
+
+  test("uppercases multi-word meal ids consistently", () => {
+    expect(mealLabel("snack-post-breakfast")).toBe(
+      mealLabel("snack-post-lunch").replace("lunch", "breakfast")
+    )
   })
 })
 
@@ -165,7 +190,7 @@ describe("foodLogEntryFromFoodResult", () => {
     const entry = foodLogEntryFromFoodResult(food, {
       grams: 150,
       micros: { fiber: 3.5, sodium: 80 },
-      meal: "snack",
+      meal: "snack-post-lunch",
       portion: { amount: 150, unit: "g", grams: 150 },
       detail: {
         ...food,
@@ -185,7 +210,7 @@ describe("foodLogEntryFromFoodResult", () => {
     expect(entry.fat).toBe(6)
     expect(entry.fiber).toBe(3.5)
     expect(entry.sodium).toBe(80)
-    expect(entry.meal).toBe("snack")
+    expect(entry.meal).toBe("snack-post-lunch")
     expect(entry.quantityGrams).toBe(150)
     expect(entry.servingGrams).toBe(125)
     expect(entry.servingLabel).toBe("1 cup")
@@ -511,15 +536,28 @@ describe("food history helpers", () => {
 
   test("copies a historical meal as fresh food log entries", () => {
     const copied = foodLogEntriesFromHistoryMeal(breakfastEntries, {
-      meal: "snack",
+      meal: "snack-post-lunch",
       loggedAt: "2026-06-30T15:00:00.000Z",
     })
 
     expect(copied).toHaveLength(2)
     expect(copied[0].id).not.toBe("oats-history")
-    expect(copied[0].meal).toBe("snack")
+    expect(copied[0].meal).toBe("snack-post-lunch")
     expect(copied[0].loggedAt).toBe("2026-06-30T15:00:00.000Z")
     expect(copied.map((entry) => entry.name)).toEqual(["Oats", "Coffee"])
+  })
+
+  test("an old single \"snack\" meal id still renders as a real meal label", () => {
+    expect(mealLabel("snack")).toBe("Snack")
+    expect(mealLabel("snack-post-breakfast")).toBe("Post-breakfast snack")
+    expect(mealLabel("snack-post-lunch")).toBe("Post-lunch snack")
+    expect(mealLabel("snack-post-dinner")).toBe("Post-dinner snack")
+  })
+
+  test("mealLabel uppercases multi-word meal ids consistently", () => {
+    expect(mealLabel("snack-post-breakfast")).toBe(
+      mealLabel("snack-post-lunch").replace("lunch", "breakfast")
+    )
   })
 })
 

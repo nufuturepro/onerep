@@ -1860,6 +1860,19 @@ function shouldUseFallbackUi(message: string) {
   );
 }
 
+/**
+ * The canned Chef Coach paragraph was the project's first fallback personality,
+ * but once the real reply path fails it reads as a working answer for any food
+ * question because it still quotes the user's live protein, calorie target, and
+ * recent intake. That is the failure that looks like a feature, so the fallback
+ * path may only use it for genuine greetings, not for a real nutrition request.
+ */
+function isRealNutritionRequest(message: string): boolean {
+  const lower = message.toLowerCase();
+  if (isCasualCoachMessage(message)) return false;
+  return /\b(?:meal|recipe|food|eat|ate|lunch|dinner|breakfast|snack|plate|dish|macro|protein|calorie|intake|diet)\b/.test(lower);
+}
+
 function fallbackCoachUiBlocks(context: CoachContext): CoachUiBlock[] {
   if (context.safetyMode !== "standard" || context.safetyFlags.length > 0) {
     return [
@@ -2100,7 +2113,7 @@ function fallbackCoachChatResponse({
       operations: [],
     };
   }
-  if (coachMode === "chef") {
+  if (coachMode === "chef" && !isRealNutritionRequest(message)) {
     return {
       reply: `Chef Coach would start with one repeatable meal built around 30–40g of protein. You’re averaging ${Math.round(context.averageProtein)}g against a ${Math.round(context.proteinTarget)}g target, with intake near ${Math.round(context.averageCalories)} kcal. Pick a recipe you will actually repeat, then adjust portions instead of rebuilding the whole day.${safetyNote}`,
       uiBlocks,
@@ -3397,16 +3410,12 @@ export const generateCoachChatMessage = action({
     return {
       ...fallback,
       reply:
-        fallback.reply &&
-        fallback.reply !== fallbackCoachChatResponse({
-          message,
-          context,
-          focusInsight,
-          coachMode,
-          history,
-        }).reply
+        isCasualCoachMessage(message)
           ? fallback.reply
           : `I couldn’t reach the coach right now. AI isn’t available on this server, so I’m showing you a general suggestion instead. Try again in a moment or finish setup and chat with Coach afterwards.`,
+      uiBlocks: isRealNutritionRequest(message)
+        ? []
+        : fallback.uiBlocks,
       artifacts: [],
       source: "fallback",
     };
